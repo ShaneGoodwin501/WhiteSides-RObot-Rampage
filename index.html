@@ -1,0 +1,2115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Swarmbot Fixer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        background: #111; overflow: hidden;
+        color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+
+    /* Generic hidden helper */
+    .hidden { display: none !important; }
+
+    /* Game container */
+    #gameContainer {
+        position: relative;
+        width: 100vw;
+        height: 100vh;       /* keep within viewport */
+        max-height: 100vh;
+        background: #222;
+        overflow: hidden;
+        transition: width 120ms ease;
+        margin: 0 auto;
+    }
+    @media (orientation: landscape) {
+        #gameContainer {
+            width: 50vw;
+            height: 100vh;   /* force again for landscape */
+            max-height: 100vh;
+            border-left: 2px solid #000;
+            border-right: 2px solid #000;
+        }
+    }
+
+    #topBar {
+        position: absolute; top: 4px; left: 0; right: 0;
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        pointer-events: none; color: #fff; text-shadow: 0 0 4px #000; z-index: 20;
+        white-space: nowrap;
+    }
+    #statsRow { display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; }
+    #statsRow span { margin: 0 4px; }
+
+    /* Fullscreen button (default portrait/inside playfield) */
+    #fsBtn {
+        position: absolute; /* JS will switch to fixed in landscape */
+        right: 8px;
+        top: 68px;
+        pointer-events: auto;
+        border: 1px solid rgba(0,180,90,0.9);
+        border-radius: 12px;
+        background: rgba(0,60,0,0.45);
+        color: #bdf4c9;
+        padding: 6px 12px;
+        font-weight: 800; font-size: 12px; letter-spacing: .3px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+        z-index: 1001;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+    }
+    #fsBtn:active { transform: scale(0.98); }
+
+    #rapidBadge {
+        display: none;
+        margin-left: 8px; padding: 2px 8px;
+        border-radius: 10px;
+        background: #ffd54a; color: #1a1a1a;
+        font-weight: 800; font-size: 13px; line-height: 1;
+        border: 1px solid #000;
+        text-shadow: none; letter-spacing: 0.3px;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: geometricPrecision;
+        vertical-align: middle;
+    }
+
+    #bossBanner {
+        display: none;
+        margin-top: 2px;
+        font-size: 18px; font-weight: 900; letter-spacing: 1px;
+        text-shadow: 0 0 6px rgba(0,0,0,0.7);
+    }
+
+    #gameCanvas {
+        display: block; width: 100%; height: 100%;
+        background: #2b2b2b; touch-action: none;
+    }
+
+    /* Controls layer sits OUTSIDE the game container */
+    .controls-global {
+        position: fixed; inset: 0; z-index: 50; pointer-events: none;
+    }
+
+    /* Portrait: bottom bar layout */
+    .controls-bottom {
+        position: fixed; left: 0; right: 0; bottom: 10px;
+        display: flex; align-items: flex-end; justify-content: space-between;
+        padding: 0 12px; pointer-events: none;
+    }
+    .controls-bottom .cluster { display: flex; gap: 35px; pointer-events: auto; }
+
+    /* Hide side controls by default (portrait) */
+    #leftSideControls, #rightSideControls { display: none; }
+
+    /* Landscape: show side controls at screen edges (outside 50% playfield) */
+    @media (orientation: landscape) {
+        .controls-bottom { display: none; }
+        #leftSideControls, #rightSideControls {
+            display: block;
+            position: fixed; top: 50%; transform: translateY(-50%);
+            pointer-events: none;
+        }
+        #leftSideControls { left: 30px; }
+        /* push arrows closer to right edge (further right) */
+        #rightSideControls { right: 10px; display: flex; flex-direction: column; gap: 35px; }
+        #leftSideControls .cluster, #rightSideControls .cluster { pointer-events: auto; }
+        #rightBtn_side { margin-left: 20px; }
+    }
+
+    .ctrl-btn {
+        pointer-events: auto;
+        min-width: 96px; min-height: 96px;
+        border-radius: 12px; border: none; background: #444; color: #fff;
+        font-size: 30px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.5); user-select: none;
+    }
+    .ctrl-btn:active { transform: scale(0.95); box-shadow: 0 1px 3px rgba(0,0,0,0.7); }
+    .ctrl-btn.fire { background: #b00000; padding: 0 24px; font-size: 24px; }
+
+    /* Start screen (arcade vibe) */
+    #startScreen {
+        position: fixed; inset: 0; background: radial-gradient(ellipse at center, #1b1b1b 0%, #0f0f0f 70%);
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        z-index: 1000; text-align: center; padding: 12px;
+    }
+    #startTitle {
+        font-family: "Press Start 2P", system-ui, sans-serif;
+        font-size: clamp(22px, 5vw, 42px);
+        letter-spacing: 2px;
+        margin-bottom: 12px;
+        animation: hueflash 1.2s infinite steps(6);
+        text-shadow: 0 0 8px rgba(0,0,0,0.9), 0 0 18px rgba(0,0,0,0.6);
+    }
+    @keyframes hueflash {
+        0% { color: #ff385c; }
+        16% { color: #ffd93d; }
+        33% { color: #5cff7a; }
+        50% { color: #4ecbff; }
+        66% { color: #b98bff; }
+        83% { color: #ff9f43; }
+        100% { color: #ff385c; }
+    }
+
+    /* Start screen dancers canvas */
+    #startDance {
+        width: min(520px, 86vw);
+        height: 210px;
+        border-radius: 12px;
+        background: rgba(0,0,0,0.25);
+        box-shadow: inset 0 0 18px rgba(0,0,0,0.6);
+        margin-bottom: 10px;
+    }
+
+    /* High scores panel on start screen */
+    #highScoresPanel {
+        margin-top: 10px;
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(0,0,0,0.4);
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.7);
+        max-width: 420px;
+        width: 100%;
+        color: #f5f5f5;
+        font-family: "Press Start 2P", system-ui, sans-serif;
+        font-size: 11px;
+        text-align: left;
+    }
+
+    #highScoresTitle {
+        text-align: center;
+        margin-bottom: 6px;
+        letter-spacing: 1px;
+        font-size: 12px;
+        text-shadow: 0 0 4px rgba(0,0,0,0.9);
+    }
+
+    #highScoresList {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    #highScoresList li {
+        display: flex;
+        justify-content: space-between;
+        padding: 2px 0;
+        white-space: nowrap;
+    }
+
+    #highScoresList li span.name {
+        max-width: 70%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    #startBtn {
+        border: none; border-radius: 12px; padding: 14px 28px;
+        background: linear-gradient(#d71a1a, #8e0f0f);
+        color: #fff; font-weight: 900; font-size: 18px; letter-spacing: 1px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.6), inset 0 2px 0 rgba(255,255,255,0.15);
+        cursor: pointer;
+        margin-top: 20px;   /* spacing under scores/dancers */
+        margin-bottom: 10px;
+    }
+    #startBtn:active { transform: translateY(1px); }
+
+    #startHint {
+        font-size: 18px;
+        opacity: 0.95; margin-bottom: 8px;
+        color: #e2ffe2;
+    }
+
+    /* Game over overlay */
+    #gameOverScreen {
+        position: absolute; inset: 0; background: rgba(0,0,0,0.7);
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; padding: 16px; z-index: 100;
+    }
+    #gameOverScreen.hidden { display: none; }
+
+    /* extra vertical spacing */
+    #gameOverScreen h1 {
+        margin: 16px 0 32px;
+        font-size: 32px; letter-spacing: 2px;
+    }
+    #gameOverText {
+        margin: 0 0 28px;
+        font-size: 18px; font-weight: 500;
+    }
+    #finalScore {
+        margin: 0 0 32px;
+        font-size: 18px;
+    }
+
+    .bigBtn {
+        border: none; background: #c00000; color: #fff; font-size: 20px; font-weight: 600;
+        padding: 10px 22px; border-radius: 10px; box-shadow: 0 3px 8px rgba(0,0,0,0.7); cursor: pointer;
+        margin-top: 8px;
+    }
+    .bigBtn:active { transform: scale(0.97); box-shadow: 0 2px 6px rgba(0,0,0,0.7); }
+
+    /* Name entry row on game over */
+    #nameEntryRow {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        margin: 32px 0;
+    }
+
+    #nameEntryLabel {
+        font-size: 16px;
+    }
+
+    #playerNameInput {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #555;
+        background: #111;
+        color: #fff;
+        font-size: 18px;
+        text-transform: uppercase;
+        text-align: center;
+        width: 200px;
+    }
+
+    #playerNameInput::placeholder {
+        color: #666; /* dark grey placeholder "ENTER NAME" */
+    }
+
+    #retryBtn {
+        margin-top: 32px; /* extra spacing under name entry / save button */
+    }
+
+    /* tiny sound-tip if autoplay is blocked */
+    #soundTip {
+        position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.7); color:#fff; padding: 6px 10px; border-radius: 10px;
+        font-size: 12px; z-index: 1100; display:none;
+        border: 1px solid rgba(255,255,255,0.25);
+    }
+</style>
+</head>
+<body>
+<!-- Start Screen -->
+<div id="startScreen">
+    <div id="startTitle">WHITESIDES ROBOT RAMPAGE</div>
+    <canvas id="startDance"></canvas>
+
+    <!-- High scores panel -->
+    <div id="highScoresPanel">
+        <div id="highScoresTitle">TOP FIXERS</div>
+        <ol id="highScoresList"></ol>
+    </div>
+
+    <button id="startBtn">START</button>
+    <div id="startHint">Tap anywhere to enable sound</div>
+</div>
+
+<!-- Playfield -->
+<div id="gameContainer">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Fullscreen toggle -->
+    <button id="fsBtn" aria-label="Toggle Fullscreen">Fullscreen</button>
+
+    <div id="topBar">
+        <div id="statsRow">
+            <span id="scoreLabel">Score: 0</span>
+            <span id="missLabel">Missed: 0 / 5</span>
+            <span id="dropsLabel" style="display:none;">Drops: 0 / 5</span>
+            <span id="rapidBadge">DRUNK</span>
+        </div>
+        <div id="bossBanner">Commission The Boom!</div>
+    </div>
+
+    <div id="gameOverScreen" class="hidden">
+        <h1>GAME OVER</h1>
+        <h2 id="gameOverText">YOU DIDNT FIX ENOUGH SWARMBOTS IN TIME</h2>
+        <p id="finalScore">Your score: 0</p>
+
+        <!-- Name entry for high score -->
+        <div id="nameEntryRow" class="hidden">
+            <label for="playerNameInput" id="nameEntryLabel">You've Made It To The Top Ten!</label>
+            <input id="playerNameInput" type="text" maxlength="8" autocomplete="name" placeholder="ENTER NAME" />
+            <button id="saveScoreBtn" class="bigBtn">Save Score</button>
+        </div>
+
+        <button id="retryBtn" class="bigBtn">Try Again</button>
+    </div>
+</div>
+
+<!-- Controls OUTSIDE the game container -->
+<div class="controls-global">
+    <!-- Portrait bottom bar -->
+    <div class="controls-bottom" id="controlsBottom">
+        <div class="cluster">
+            <button class="ctrl-btn fire" id="fireBtn_bottom">FIRE</button>
+        </div>
+        <div class="cluster">
+            <button class="ctrl-btn" id="leftBtn_bottom">◀</button>
+            <button class="ctrl-btn" id="rightBtn_bottom">▶</button>
+        </div>
+    </div>
+
+    <!-- Landscape sides (hidden in portrait) -->
+    <div id="leftSideControls">
+        <div class="cluster">
+            <button class="ctrl-btn fire" id="fireBtn_side">FIRE</button>
+        </div>
+    </div>
+    <div id="rightSideControls">
+        <div class="cluster" id="rightCluster">
+            <button class="ctrl-btn" id="leftBtn_side">◀</button>
+            <button class="ctrl-btn" id="rightBtn_side">▶</button>
+        </div>
+    </div>
+</div>
+
+<!-- Small tip if browser blocks auto-audio -->
+<div id="soundTip">Tap anywhere to enable sound</div>
+
+<script>
+(function() {
+    // ---------- layout ----------
+    const UI_GUTTER_BASE = 140;
+    function isLandscape() { return window.innerWidth > window.innerHeight; }
+    function currentGutter() { return isLandscape() ? Math.round(UI_GUTTER_BASE * 0.2) : UI_GUTTER_BASE; }
+
+    // ---------- canvas ----------
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const gameContainer = document.getElementById('gameContainer');
+    const scoreLabel = document.getElementById('scoreLabel');
+    const missLabel = document.getElementById('missLabel');
+    const dropsLabel = document.getElementById('dropsLabel');
+    const rapidBadge = document.getElementById('rapidBadge');
+    const bossBanner = document.getElementById('bossBanner');
+
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const gameOverText = document.getElementById('gameOverText');
+    const finalScoreLabel = document.getElementById('finalScore');
+    const retryBtn = document.getElementById('retryBtn');
+
+    const fsBtn = document.getElementById('fsBtn');
+
+    // Controls (portrait bottom bar)
+    const fireBtn_bottom = document.getElementById('fireBtn_bottom');
+    const leftBtn_bottom = document.getElementById('leftBtn_bottom');
+    const rightBtn_bottom = document.getElementById('rightBtn_bottom');
+
+    // Controls (landscape sides)
+    const fireBtn_side = document.getElementById('fireBtn_side');
+    const leftBtn_side = document.getElementById('leftBtn_side');
+    const rightBtn_side = document.getElementById('rightBtn_side');
+    const rightCluster = document.getElementById('rightCluster');
+
+    // Start screen
+    const startScreen = document.getElementById('startScreen');
+    const startBtn = document.getElementById('startBtn');
+    const startDance = document.getElementById('startDance');
+    const soundTip = document.getElementById('soundTip');
+
+    // Highscore DOM (SERVER-BASED)
+    const HS_URL = 'highscores.php'; // server endpoint
+    const highScoresList = document.getElementById('highScoresList');
+    const nameEntryRow = document.getElementById('nameEntryRow');
+    const playerNameInput = document.getElementById('playerNameInput');
+    const saveScoreBtn = document.getElementById('saveScoreBtn');
+    let highScores = [];
+
+    let width = 0, height = 0;
+    const groundMargin = 40;
+    let groundY;
+
+    // ---------- audio ----------
+    let audioCtx = null, masterGain = null, musicGain = null, sfxGain = null;
+    function initAudio() {
+        if (audioCtx) return;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.36;
+
+        musicGain = audioCtx.createGain();
+        musicGain.gain.value = 0.30;
+
+        sfxGain = audioCtx.createGain();
+        sfxGain.gain.value = 0.36;
+
+        musicGain.connect(masterGain);
+        sfxGain.connect(masterGain);
+        masterGain.connect(audioCtx.destination);
+    }
+    async function ensureAudioResumed() {
+        initAudio();
+        try {
+            if (audioCtx.state === 'suspended') { await audioCtx.resume(); }
+        } catch(e) { /* ignore */ }
+    }
+
+    function tone(freq=440, dur=0.12, type='square', vol=0.4, to= sfxGain) {
+        if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(vol, now + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+        osc.connect(g); g.connect(to);
+        osc.start(now);
+        osc.stop(now + dur + 0.05);
+    }
+
+    function noiseBurst(dur=0.05, vol=0.25, type='highpass', cutoff=5000, to= musicGain) {
+        if (!audioCtx) return;
+        const bufferSize = Math.floor(audioCtx.sampleRate * dur);
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random()*2 - 1;
+
+        const src = audioCtx.createBufferSource();
+        src.buffer = buffer;
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = type;
+        filter.frequency.value = cutoff;
+
+        const g = audioCtx.createGain();
+        g.gain.value = vol;
+        src.connect(filter); filter.connect(g); g.connect(to);
+        src.start();
+    }
+
+    // SFX dictionary
+    const sfx = {
+        fire: () => { tone(740, 0.07, 'square', 0.35); tone(520, 0.06, 'triangle', 0.2); },
+        hit:  () => { tone(220, 0.08, 'sawtooth', 0.35); },
+        beer: () => { tone(880, 0.08, 'triangle', 0.35); },
+        bossHit: () => { tone(160, 0.12, 'square', 0.42); },
+        bossExplode: () => { tone(90, 0.25, 'sawtooth', 0.55); tone(60, 0.35, 'triangle', 0.5); },
+        gameOver: () => { tone(260, 0.25, 'square', 0.35); setTimeout(()=>tone(180,0.35,'square',0.35),130); }
+    };
+
+    /* -------- START SCREEN MUSIC: DRUM-HEAVY LOOP -------- */
+    let startMusicTimer = null;
+    let startMusicStep = 0; // 16th notes
+    const START_BPM = 110;
+    const startSixteenthMs = Math.round(60000 / (START_BPM * 4));
+
+    function kick(vol=0.7){ tone(70,0.10,'sine',vol,musicGain); }
+    function snare(vol=0.4){ noiseBurst(0.07,vol,'bandpass',1900,musicGain); }
+    function hat(vol=0.18){ noiseBurst(0.02,vol,'highpass',8000,musicGain); }
+    function tom(f=140,vol=0.35){ tone(f,0.08,'triangle',vol,musicGain); }
+
+    function startStartMusic() {
+        stopStartMusic();
+        startMusicStep = 0;
+        startMusicTimer = setInterval(() => {
+            const s = startMusicStep % 16;
+            if (s === 0 || s === 8) kick(0.9);
+            if (s === 10) kick(0.65);
+            if (s === 4 || s === 12) snare(0.48);
+            if (s % 2 === 0) hat(0.16);
+            if (s === 14) { tom(170,0.35); tom(130,0.28); }
+            startMusicStep++;
+        }, startSixteenthMs);
+    }
+    function stopStartMusic() {
+        if (startMusicTimer) { clearInterval(startMusicTimer); startMusicTimer = null; }
+    }
+
+    // Try to autoplay immediately; if blocked, show tiny tip and arm one-tap resume.
+    function attemptAutoplayStartMusic() {
+        initAudio();
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume().then(() => {
+                startStartMusic();
+            }).catch(() => {
+                showSoundTip();
+            });
+        } else {
+            startStartMusic();
+        }
+        setTimeout(() => {
+            if (audioCtx.state !== 'running') showSoundTip();
+        }, 500);
+    }
+    function showSoundTip() {
+        soundTip.style.display = 'block';
+        const unlock = async () => {
+            await ensureAudioResumed();
+            if (audioCtx.state === 'running') {
+                soundTip.style.display = 'none';
+                startStartMusic();
+                window.removeEventListener('pointerdown', unlock, true);
+                document.removeEventListener('visibilitychange', visibilityUnlock, true);
+            }
+        };
+        const visibilityUnlock = async () => {
+            if (!document.hidden) unlock();
+        };
+        window.addEventListener('pointerdown', unlock, true);
+        document.addEventListener('visibilitychange', visibilityUnlock, true);
+    }
+
+    /* -------- BOSS MUSIC (upbeat) -------- */
+    let bossMusicTimer = null;
+    let bossStep = 0;
+    const BPM = 150;
+    const sixteenthMs = Math.round(60000 / (BPM * 4));
+
+    function playKick() { tone(80, 0.08, 'sine', 0.55, musicGain); }
+    function playSnare() { noiseBurst(0.06, 0.32, 'bandpass', 2200, musicGain); }
+    function playHat() { noiseBurst(0.02, 0.22, 'highpass', 6000, musicGain); }
+    function playBass(step) {
+        const root = 110; // A2
+        const pattern = [0, 7, 0, 3];
+        theIdx = Math.floor(step / 4) % pattern.length;
+        const freq = root * Math.pow(2, pattern[theIdx] / 12);
+        tone(freq, 0.12, 'square', 0.28, musicGain);
+    }
+    function playLead(step) {
+        const scale = [0, 3, 5, 7, 10, 12];
+        const base = 440; // A4
+        const deg = scale[(step % scale.length)];
+        const f = base * Math.pow(2, deg/12);
+        tone(f, 0.09, 'sawtooth', 0.22, musicGain);
+    }
+
+    function startBossMusic() {
+        stopStartMusic();
+        stopBossMusic();
+        bossStep = 0;
+        bossMusicTimer = setInterval(() => {
+            if (bossStep % 4 === 0) playKick();
+            if (bossStep % 8 === 4) playSnare();
+            playHat();
+            if (bossStep % 4 === 0) playBass(bossStep);
+            if (bossStep % 2 === 0) playLead(bossStep / 2);
+            bossStep = (bossStep + 1) % 64;
+        }, sixteenthMs);
+    }
+    function stopBossMusic() {
+        if (bossMusicTimer) { clearInterval(bossMusicTimer); bossMusicTimer = null; }
+    }
+
+    /* -------- VICTORY SONG (4s) -------- */
+    let victoryTimeouts = [];
+    function clearVictorySong() { victoryTimeouts.forEach(id => clearTimeout(id)); victoryTimeouts = []; }
+    function scheduleTone(delayMs, f, dur=0.18, type='square', vol=0.4) {
+        const id = setTimeout(() => tone(f, dur, type, vol, musicGain), delayMs);
+        victoryTimeouts.push(id);
+    }
+    function playVictorySong() {
+        clearVictorySong();
+        const motif = [
+            { t:   0,  f: 440,  d:0.22, v:0.5 },
+            { t: 200,  f: 659.25, d:0.18, v:0.45 },
+            { t: 380,  f: 880, d:0.20, v:0.5 },
+            { t: 600,  f: 587.33, d:0.18, v:0.45 },
+            { t: 800,  f: 880, d:0.22, v:0.5 },
+            { t:1000,  f: 987.77, d:0.22, v:0.5 },
+            { t:1200,  f: 880, d:0.22, v:0.5 },
+            { t:1400,  f: 659.25, d:0.20, v:0.45 },
+            { t:1700,  f: 440, d:0.12, v:0.45 },
+            { t:1820,  f: 554.37, d:0.12, v:0.45 },
+            { t:1940,  f: 659.25, d:0.12, v:0.45 },
+            { t:2060,  f: 880, d:0.14, v:0.5 },
+            { t:2500,  f: 440, d:0.35, v:0.5 },
+            { t:2500,  f: 659.25, d:0.35, v:0.5, type:'triangle' },
+            { t:2500,  f: 987.77, d:0.35, v:0.45, type:'triangle' }
+        ];
+        motif.forEach(n => scheduleTone(n.t, n.f, n.d, n.type || 'square', n.v));
+        [0, 600, 1200, 1800, 2500].forEach(t => {
+            const id = setTimeout(() => noiseBurst(0.04, 0.28, 'highpass', 7000, musicGain), t);
+            victoryTimeouts.push(id);
+        });
+        const endId = setTimeout(clearVictorySong, 4000);
+        victoryTimeouts.push(endId);
+    }
+
+    /* -------- RAPID-FIRE "TICKING" MUSIC -------- */
+    let rapidTickTimer = null;
+    const RAPID_TOTAL_MS = 10000;
+
+    function playTick() {
+        tone(1200, 0.03, 'triangle', 0.28, musicGain);
+        noiseBurst(0.01, 0.08, 'highpass', 8000, musicGain);
+    }
+
+    function startRapidTick() {
+        stopRapidTick();
+        const tickLoop = () => {
+            const remaining = Math.max(0, rapidUntil - performance.now());
+            if (remaining <= 0) { stopRapidTick(); return; }
+            playTick();
+            const fracElapsed = 1 - (remaining / RAPID_TOTAL_MS);
+            const delay = Math.max(60, Math.round(300 - 210 * fracElapsed));
+            rapidTickTimer = setTimeout(tickLoop, delay);
+        };
+        tickLoop();
+    }
+    function stopRapidTick() {
+        if (rapidTickTimer) { clearTimeout(rapidTickTimer); rapidTickTimer = null; }
+    }
+
+    // ---------- highscores helpers (SERVER SIDE) ----------
+    async function fetchHighScoresFromServer() {
+        try {
+            const res = await fetch(HS_URL, { method: 'GET' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            if (!Array.isArray(data)) return [];
+            return data
+                .filter(e => e && typeof e.name === 'string' && typeof e.score === 'number')
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10);
+        } catch (e) {
+            console.warn('Failed to fetch highscores from server', e);
+            return [];
+        }
+    }
+
+    async function postHighScoreToServer(name, scoreVal) {
+        try {
+            const res = await fetch(HS_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, score: scoreVal })
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            if (Array.isArray(data)) {
+                highScores = data
+                    .filter(e => e && typeof e.name === 'string' && typeof e.score === 'number')
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, 10);
+                renderHighScores();
+            }
+        } catch (e) {
+            console.warn('Failed to post high score', e);
+            // Could show error UI if desired
+        }
+    }
+
+    function renderHighScores() {
+        if (!highScoresList) return;
+        highScoresList.innerHTML = '';
+
+        if (!highScores.length) {
+            const li = document.createElement('li');
+            li.style.opacity = '0.8';
+            li.textContent = 'No scores yet – fix some bots!';
+            highScoresList.appendChild(li);
+            return;
+        }
+
+        highScores.forEach((entry, idx) => {
+            const li = document.createElement('li');
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'name';
+            nameSpan.textContent = (idx + 1) + '. ' + entry.name;
+
+            const scoreSpan = document.createElement('span');
+            scoreSpan.className = 'score';
+            scoreSpan.textContent = entry.score;
+
+            li.appendChild(nameSpan);
+            li.appendChild(scoreSpan);
+            highScoresList.appendChild(li);
+        });
+    }
+
+    function isHighScore(scoreVal) {
+        if (scoreVal <= 0) return false;
+        if (highScores.length < 10) return true;
+        return scoreVal > highScores[highScores.length - 1].score;
+    }
+
+    // Initial load of high scores from server
+    fetchHighScoresFromServer().then(list => {
+        highScores = list;
+        renderHighScores();
+    });
+
+    // ---------- player ----------
+    const player = { x: 0, y: 0, width: 22, height: 48, speed: 390 };
+
+    let moveLeft = false;
+    let moveRight = false;
+    let fireHold = false;     // only used during DRUNK (rapid) mode
+    let lastFireTime = 0;
+    const baseCooldown = 200;
+    const rapidCooldown = 70;
+
+    // ---------- game state ----------
+    let started = false;
+    let projectiles = [];
+    let robots = [];
+    let explosions = [];
+    let fires = [];
+    let complainers = [];
+    let beers = [];
+
+    let score = 0;
+    let missed = 0;
+    const maxMissed = 5;
+
+    let dropsHits = 0;
+    const maxDropsHits = 5;
+
+    let gameRunning = false;
+    let spawnTimer = 0;
+    let spawnInterval = 900;
+
+    let timeSinceStart = 0;
+
+    const killPhrases = [
+        "Yeah Gundy",
+        "It's Fucked, It's Smoking",
+        "I Gotta Run, My Horse Has Colic",
+        "I've gotta go and seed my paddock"
+    ];
+
+    let fixCount = 0;
+    let speechBubble = null;
+
+    // Rapid fire power-up timing
+    let rapidUntil = 0;
+    function isRapid() { return performance.now() < rapidUntil; }
+    function currentCooldown() { return isRapid() ? rapidCooldown : baseCooldown; }
+
+    // Beer spawn pacing
+    let lastBeerSpawn = 0;            // ms
+    const minBeerGap = 20000;         // 20s minimum between spawns
+    const beerChance = 0.03;          // 3% chance when eligible
+
+    // ---------- BOOM (boss) ----------
+    let bossActive = false;
+    let boss = null;
+    let droplets = [];
+    let dropletTimer = 0;
+
+    const BOSS_TRIGGER_GAP_MS = 40000;   // ~40s between booms
+    const BOSS_HP = 25;
+
+    let boomIndex = 0;                 // 0..2 (cycles)
+    let nextBoomAtMs = BOSS_TRIGGER_GAP_MS;
+
+    // Celebration state
+    let celebrationActive = false;
+    let celebrationUntil = 0;
+    let confetti = [];
+    let dancers = [];
+    let cheerPhase = 0;
+
+    function getBoomBannerText(index) {
+        if (index % 3 === 0) return "Configure The Croplands Boom";
+        if (index % 3 === 1) return "Configure the Hayes Boom";
+        return "Configure the Boss Boom";
+    }
+
+    function resizeCanvas() {
+        const rect = gameContainer.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        width = rect.width;
+        height = rect.height;
+
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const gutter = currentGutter();
+        groundY = height - (gutter + groundMargin);
+        player.y = groundY - player.height;
+
+        if (player.x === 0) player.x = width / 2;
+        player.x = Math.max(20, Math.min(width - 20, player.x));
+    }
+
+    window.addEventListener('resize', () => { resizeCanvas(); if (!started) layoutStartScreen(true); positionFsBtn(); });
+    resizeCanvas();
+
+    window.addEventListener('orientationchange', () => {
+        setTimeout(() => { window.location.reload(); }, 300);
+    });
+
+    // ---------- drawing helpers ----------
+    function drawFooterPanel() {
+        const gutter = currentGutter();
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(0, height - gutter, width, gutter);
+    }
+
+    function drawGround() {
+        ctx.fillStyle = "#0e3a0e";
+        ctx.fillRect(0, groundY, width, groundMargin);
+        ctx.strokeStyle = "#2a5f2a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, groundY);
+        ctx.lineTo(width, groundY);
+        ctx.stroke();
+    }
+
+    // Small beer mug icon (used in cheer pose)
+    function drawBeerMug(x, y, scale=1) {
+        const w = 10 * scale, h = 16 * scale;
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 215, 70, 0.95)";
+        ctx.fillRect(x - w/2, y - h, w, h);
+        ctx.fillStyle = "#eee";
+        ctx.fillRect(x - w/2, y - h, w, 4 * scale);
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.ellipse(x - w*0.2, y - h - 2*scale, w*0.35, 3*scale, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.lineWidth = 2 * scale; ctx.strokeStyle = "#ddd";
+        ctx.arc(x + w/2 + 2*scale, y - h/2, 4*scale, -Math.PI/2, Math.PI/2); ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawPlayerCheering() {
+        const x = player.x, y = player.y;
+        cheerPhase += 0.2;
+        const pump = Math.sin(cheerPhase) * 6;
+
+        ctx.save();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+
+        const headRadius = 8;
+        ctx.beginPath(); ctx.arc(x, y + headRadius, headRadius, 0, Math.PI * 2); ctx.stroke();
+
+        const bodyTop = y + headRadius * 2, bodyBottom = bodyTop + 18;
+        ctx.beginPath(); ctx.moveTo(x, bodyTop); ctx.lineTo(x, bodyBottom); ctx.stroke();
+
+        const legLen = 16;
+        ctx.beginPath();
+        ctx.moveTo(x, bodyBottom); ctx.lineTo(x - 8, bodyBottom + legLen);
+        ctx.moveTo(x, bodyBottom); ctx.lineTo(x + 8, bodyBottom + legLen);
+        ctx.stroke();
+
+        const armBaseY = bodyTop + 4;
+        const leftHandX  = x - 12;
+        const theLeftHandY  = armBaseY - 16 - pump;
+        const rightHandX = x + 12;
+        const rightHandY = armBaseY - 18 + pump;
+
+        ctx.beginPath();
+        ctx.moveTo(x, armBaseY); ctx.lineTo(leftHandX,  theLeftHandY);
+        ctx.moveTo(x, armBaseY); ctx.lineTo(rightHandX, rightHandY);
+        ctx.stroke();
+
+        drawBeerMug(leftHandX,  theLeftHandY, 0.9);
+        drawBeerMug(rightHandX, rightHandY, 0.9);
+
+        ctx.restore();
+    }
+
+    function drawPlayerNormal() {
+        const x = player.x, y = player.y;
+
+        ctx.save();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+
+        const headRadius = 8;
+        ctx.beginPath(); ctx.arc(x, y + headRadius, headRadius, 0, Math.PI * 2); ctx.stroke();
+
+        const bodyTop = y + headRadius * 2, bodyBottom = bodyTop + 18;
+        ctx.beginPath(); ctx.moveTo(x, bodyTop); ctx.lineTo(x, bodyBottom); ctx.stroke();
+
+        const legLen = 16;
+        ctx.beginPath();
+        ctx.moveTo(x, bodyBottom); ctx.lineTo(x - 8, bodyBottom + legLen);
+        ctx.moveTo(x, bodyBottom); ctx.lineTo(x + 8, bodyBottom + legLen);
+        ctx.stroke();
+
+        const armY = bodyTop + 6;
+
+        ctx.beginPath();
+        ctx.moveTo(x, armY); ctx.lineTo(x - 12, armY + 4);
+        ctx.moveTo(x, armY); ctx.lineTo(x + 16, armY + 2);
+        ctx.stroke();
+
+        /* vertical open-end spanner in right hand */
+        const shaftX = x + 16;
+        const shaftBaseY = armY + 2;
+        const shaftLen = 22;
+        const shaftTopY = shaftBaseY - shaftLen;
+
+        ctx.strokeStyle = "#cfcfcf";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(shaftX, shaftBaseY);
+        ctx.lineTo(shaftX, shaftTopY);
+        ctx.stroke();
+
+        const cresR = 6;
+        const cxh = shaftX;
+        const cyh = shaftTopY - 1;
+
+        ctx.beginPath(); ctx.arc(cxh, cyh, cresR, -Math.PI * 0.25, Math.PI * 0.25, false); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cxh - 2, cyh, cresR - 3, -Math.PI * 0.25, Math.PI * 0.25, false); ctx.stroke();
+
+        if (isRapid()) {
+            ctx.strokeStyle = "rgba(255, 230, 100, 0.7)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(x, y + headRadius, headRadius + 4, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function rrRoundedRect(x, y, w, h, r) {
+        const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + w - radius, y);
+        ctx.arcTo(x + w, y, x + w, y + radius, radius);
+        ctx.lineTo(x + w, y + h - radius);
+        ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+        ctx.lineTo(x + radius, y + h);
+        ctx.arcTo(x, y + h, x, y + h - radius, radius);
+        ctx.lineTo(x, y + radius);
+        ctx.arcTo(x, y, x + radius, y, radius);
+    }
+
+    function drawSpeechBubbleForPlayer() {
+        if (!speechBubble || speechBubble.remaining <= 0) return;
+        const x = player.x, y = player.y - 12;
+        const padding = 6;
+        ctx.font = "12px system-ui, sans-serif";
+        const textWidth = ctx.measureText(speechBubble.text).width;
+        const bubbleWidth = textWidth + padding * 2;
+        const bubbleHeight = 20;
+
+        let bx = x - bubbleWidth / 2, by = y - bubbleHeight;
+        if (bx < 4) bx = 4;
+        if (bx + bubbleWidth > width - 4) bx = width - 4 - bubbleWidth;
+
+        ctx.save();
+        ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#000000"; ctx.lineWidth = 2;
+        rrRoundedRect(bx, by, bubbleWidth, bubbleHeight, 6);
+        ctx.fill(); ctx.stroke();
+
+        const tailX = x, tailY = by + bubbleHeight;
+        ctx.beginPath();
+        ctx.moveTo(tailX - 4, tailY); ctx.lineTo(tailX + 4, tailY); ctx.lineTo(tailX, tailY + 6);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = "#000000";
+        ctx.fillText(speechBubble.text, bx + padding, by + 14);
+        ctx.restore();
+    }
+
+    function drawRobot(r) {
+        const x = r.x, y = r.y, w = r.width, h = r.height;
+
+        ctx.save();
+        ctx.fillStyle = "#ff8800";
+        const legWidth = w * 0.25 * 0.6;
+        const topThickness = h * 0.3 * 0.6;
+        const legHeight = h - topThickness;
+
+        /* legs up to the top bar */
+        ctx.fillRect(x, y + h - legHeight, legWidth, legHeight);
+        ctx.fillRect(x + w - legWidth, y + h - legHeight, legWidth, legHeight);
+        ctx.fillRect(x, y, w, topThickness);
+
+        /* wheels */
+        const wheelRadius = h * 0.234;
+        const wheelY = y + h - wheelRadius;
+        const leftWheelX = x + legWidth * 0.5;
+        const rightWheelX = x + w - legWidth * 0.5;
+
+        [leftWheelX, rightWheelX].forEach(cx => {
+            ctx.beginPath(); ctx.fillStyle = "#000"; ctx.arc(cx, wheelY, wheelRadius, 0, Math.PI * 2); ctx.fill();
+            ctx.lineWidth = 1; ctx.strokeStyle = "#c0c0c0"; ctx.stroke();
+            ctx.beginPath(); ctx.fillStyle = "#aaa"; ctx.arc(cx, wheelY, wheelRadius * 0.375, 0, Math.PI * 2); ctx.fill();
+        });
+
+        /* hood (grey rectangle aligned left, 65% width, height = 60% of its width) */
+        const hoodWidth = w * 0.65, hoodHeight = hoodWidth * 0.6;
+        const hoodX = x;
+        const hoodTop = y - hoodHeight;
+        ctx.fillStyle = "#999";
+        ctx.fillRect(hoodX, hoodTop, hoodWidth, hoodHeight);
+
+        /* antennas: two 1px black lines, 10% inset from right; length = 90% of hood height */
+        const antennaLen = hoodHeight * 0.9;
+        const baseY = hoodTop;
+        const ax = hoodX + hoodWidth * 0.9;
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(ax, baseY);
+        ctx.lineTo(ax, baseY - antennaLen);
+        ctx.moveTo(ax - 3, baseY);
+        ctx.lineTo(ax - 3, baseY - antennaLen);
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function drawProjectile(p) {
+        ctx.save();
+        ctx.strokeStyle = "#d8d8d8";
+        ctx.lineWidth = 2.6;
+        ctx.lineCap = "round";
+        const shaftLen = 16;
+        const topY = p.y - shaftLen;
+        const botY = p.y + 2;
+        ctx.beginPath(); ctx.moveTo(p.x, topY); ctx.lineTo(p.x, botY); ctx.stroke();
+        const r = 5;
+        ctx.beginPath(); ctx.arc(p.x, topY, r, -Math.PI * 0.25, Math.PI * 0.25, false); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x - 2, topY, r - 2.5, -Math.PI * 0.25, Math.PI * 0.25, false); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x, botY, r, Math.PI * 0.75, Math.PI * 1.25, false); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x - 2, botY, r - 2.5, Math.PI * 0.75, Math.PI * 1.25, false); ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawExplosion(e) {
+        const lifeRatio = e.remaining / e.total;
+        const theRadius = e.radius * (0.5 + 0.5 * lifeRatio);
+        const x = e.x, y = e.y;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, theRadius);
+        g.addColorStop(0, "rgba(255,255,255," + lifeRatio + ")");
+        g.addColorStop(0.3, "rgba(255,200,0," + lifeRatio + ")");
+        g.addColorStop(0.8, "rgba(255,80,0," + lifeRatio * 0.8 + ")");
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.save();
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, theRadius, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255," + lifeRatio + ")";
+        ctx.font = "bold 16px system-ui, sans-serif"; ctx.textAlign = "center";
+        ctx.fillText("FIXED", x, y - theRadius - 4);
+        ctx.restore();
+    }
+
+    function drawFire(f) {
+        const x = f.x, base = f.size, flicker = (Math.random() - 0.5) * 4;
+
+        ctx.save();
+        ctx.fillStyle = "#173f17";
+        ctx.fillRect(x - base * 0.3, groundY + groundMargin - 6, base * 0.6, 6);
+
+        const gyMid = groundY + groundMargin - base / 2;
+        const grad = ctx.createRadialGradient(x, gyMid, 0, x, gyMid, base);
+        grad.addColorStop(0, "rgba(255,255,180,0.9)");
+        grad.addColorStop(0.3, "rgba(255,200,0,0.9)");
+        grad.addColorStop(0.7, "rgba(255,80,0,0.8)");
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.ellipse(x, gyMid + flicker, base * 0.7, base, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+    }
+
+    function drawBeerFalling(b) {
+        const x = b.x, y = b.y, w = b.w, h = b.h;
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 215, 70, 0.95)";
+        ctx.fillRect(x - w/2, y - h, w, h);
+        ctx.fillStyle = "#eee";
+        ctx.fillRect(x - w/2, y - h, w, 6);
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.ellipse(x - w*0.15, y - h - 4, w*0.3, 6, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(x + w*0.1,  y - h - 2, w*0.35, 6, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.lineWidth = 3; ctx.strokeStyle = "#ddd";
+        ctx.arc(x + w/2 + 5, y - h/2, 7, -Math.PI/2, Math.PI/2); ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawBoss(b) {
+        if (!b) return;
+        ctx.save();
+
+        ctx.globalAlpha = 1;
+
+        // Body with outline
+        ctx.fillStyle = b.bodyColor;
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#ffffff";
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+        // Wheels
+        const wheelW = Math.max(14, b.w * 0.09);
+        const wheelH = Math.max(18, b.h * 0.75);
+        const wheelY = b.y + b.h - wheelH;
+        ctx.fillStyle = "#000";
+        ctx.fillRect(b.x - wheelW + 4, wheelY, wheelW, wheelH);
+        ctx.fillRect(b.x + b.w - 4, wheelY, wheelW, wheelH);
+
+        // Hitch bar
+        ctx.fillStyle = "#550000";
+        ctx.fillRect(b.x + 8, b.y + b.h - 10, b.w - 16, 6);
+
+        // Boom (folds upward in a V)
+        const cx = b.x + b.w / 2;
+        const cy = b.y + b.h * 0.4;
+
+        const angleFromHorizontal = (Math.PI / 2) * b.foldPhase;
+        const outerProgress = b.outerPhase;
+
+        drawBoomSide(cx, cy, -1, angleFromHorizontal, outerProgress, b);
+        drawBoomSide(cx, cy,  1, angleFromHorizontal, outerProgress, b);
+        ctx.restore();
+    }
+
+    function drawBoomSide(cx, cy, dir, angleFromHorizontal, outerProgress, b) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#cccccc";
+        ctx.lineWidth = 6;
+        ctx.lineCap = "round";
+
+        const thetaInner = (dir === 1) ? -angleFromHorizontal : (Math.PI + angleFromHorizontal);
+        const x1 = cx + Math.cos(thetaInner) * b.boomInnerLen;
+        const y1 = cy + Math.sin(thetaInner) * b.boomInnerLen;
+
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x1, y1); ctx.stroke();
+
+        ctx.fillStyle = "#999";
+        ctx.beginPath(); ctx.arc(x1, y1, 5, 0, Math.PI * 2); ctx.fill();
+
+        const rel = Math.PI * (1 - outerProgress);
+        const thetaOuter = thetaInner + (dir === 1 ? rel : -rel);
+
+        const x2 = x1 + Math.cos(thetaOuter) * b.boomOuterLen;
+        const y2 = y1 + Math.sin(thetaOuter) * b.boomOuterLen;
+
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+
+        ctx.fillStyle = "#bbb";
+        ctx.beginPath(); ctx.arc(x2, y2, 4, 0, Math.PI * 2); ctx.fill();
+
+        // nozzles
+        const nozzleCount = 6;
+        for (let i = 1; i <= nozzleCount; i++) {
+            const t = i / (nozzleCount + 1);
+            const nx = x1 + (x2 - x1) * t;
+            const ny = y1 + (y2 - y1) * t;
+            ctx.fillStyle = "#4ea3ff";
+            ctx.fillRect(nx - 1, ny - 6, 2, 3);
+        }
+        ctx.restore();
+    }
+
+    function drawComplainer(c) {
+        const x = c.x, y = groundY - 4;
+        ctx.save();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = "round";
+
+        // head
+        ctx.beginPath(); ctx.arc(x, y - 26, 6, 0, Math.PI*2); ctx.stroke();
+        // body
+        ctx.beginPath(); ctx.moveTo(x, y - 20); ctx.lineTo(x, y - 6); ctx.stroke();
+        // legs
+        ctx.beginPath();
+        ctx.moveTo(x, y - 6); ctx.lineTo(x - 6, y + 8);
+        ctx.moveTo(x, y - 6); ctx.lineTo(x + 6, y + 8);
+        ctx.stroke();
+
+        // arm/fist
+        let fistY = y - 22;
+        if (c.phase === "shake") fistY -= Math.sin(c.t * 20) * 4;
+        ctx.beginPath(); ctx.moveTo(x, y - 16); ctx.lineTo(x - 10 * c.dir, fistY); ctx.stroke();
+
+        ctx.beginPath(); ctx.arc(x - 10 * c.dir, fistY, 3, 0, Math.PI*2); ctx.stroke();
+
+        if (c.phase === "shake") {
+            const text = "Damn you Whiteside!";
+            ctx.font = "12px system-ui, sans-serif";
+            const pad = 6;
+            const w = ctx.measureText(text).width + pad*2;
+            const h = 20;
+            const bx = x - (c.dir === 1 ? 0 : w);
+            const by = y - 44;
+
+            ctx.fillStyle = "#fff"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+            rrRoundedRect(bx, by, w, h, 6); ctx.fill(); ctx.stroke();
+
+            ctx.beginPath();
+            const tailX = c.dir === 1 ? bx + 8 : bx + w - 8;
+            ctx.moveTo(tailX, by + h);
+            ctx.lineTo(tailX + (c.dir === 1 ? -4 : 4), by + h + 6);
+            ctx.lineTo(tailX + (c.dir === 1 ? 4 : -4), by + h);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+
+            ctx.fillStyle = "#000"; ctx.fillText(text, bx + pad, by + 14);
+        }
+
+        ctx.restore();
+    }
+
+    function spawnRobot() {
+        const w = 47, h = 40;
+        const x = Math.random() * (width - w - 20) + 10;
+        const y = -h - 10;
+        const speed = 60 + Math.random() * 90;
+        robots.push({ x, y, width: w, height: h, speed });
+    }
+    function seedRobots(n = 3) { for (let i = 0; i < n; i++) spawnRobot(); }
+
+    function maybeSpawnBeer(nowMs) {
+        if (bossActive || celebrationActive) return;
+        if (beers.length > 0) return;
+        if (nowMs - lastBeerSpawn < minBeerGap) return;
+        if (Math.random() < beerChance) {
+            const w = 18, h = 26;
+            const x = Math.random() * (width - 40) + 20;
+            const y = -h - 10;
+            const speed = 80 + Math.random() * 40;
+            beers.push({ x, y, w, h, speed });
+            lastBeerSpawn = nowMs;
+        }
+    }
+
+    function fireSpanner() {
+        const now = performance.now();
+        if (!gameRunning) return;
+        if (now - lastFireTime < currentCooldown()) return;
+        lastFireTime = now;
+        projectiles.push({ x: player.x, y: player.y, speed: 330 });
+        sfx.fire();
+    }
+
+    function handleRobotFixed(robot) {
+        score += 10; fixCount++;
+        scoreLabel.textContent = "Score: " + score;
+        sfx.hit();
+
+        explosions.push({
+            x: robot.x + robot.width / 2,
+            y: robot.y + robot.height / 2,
+            radius: 26, total: 500, remaining: 500
+        });
+
+        if (fixCount % 2 === 0) {
+            speechBubble = {
+                text: killPhrases[Math.floor(Math.random() * killPhrases.length)],
+                remaining: 1400
+            };
+        }
+    }
+
+    function handleRobotMissed(robot) {
+        missed++;
+        missLabel.textContent = "Missed: " + missed + " / " + maxMissed;
+
+        const cx = robot.x + robot.width / 2;
+        explosions.push({ x: cx, y: groundY - 10, radius: 22, total: 500, remaining: 500 });
+        fires.push({ x: cx, y: groundY, size: 18, remaining: 6000 });
+
+        spawnComplainer();
+        if (missed >= maxMissed) endGame("YOU DIDNT FIX ENOUGH SWARMBOTS IN TIME");
+    }
+
+    function spawnComplainer() {
+        const fromLeft = Math.random() < 0.5;
+        const x = fromLeft ? -20 : width + 20;
+        const targetX = fromLeft ? width * 0.3 : width * 0.7;
+
+        complainers.push({
+            x, y: groundY, dir: fromLeft ? 1 : -1, targetX,
+            phase: "enter", t: 0, durationShake: 2000, speed: 80
+        });
+    }
+
+    // ---- new helper: send the player back to the start screen after saving a high score ----
+    function goToStartScreen() {
+        // Stop any game audio loops
+        stopBossMusic();
+        stopRapidTick();
+        clearVictorySong();
+
+        // Mark game as not running
+        gameRunning = false;
+        started = false;
+
+        // Hide game over, show start screen
+        gameOverScreen.classList.add('hidden');
+        startScreen.style.display = 'flex';
+        soundTip.style.display = 'none';
+
+        // Restart title dancers + music
+        stopStartMusic();
+        stopStartDance();
+        startStartDance();
+        startStartMusic();
+    }
+
+    function endGame(customText) {
+        gameRunning = false;
+        robots = []; projectiles = []; beers = []; droplets = [];
+        bossActive = false; celebrationActive = false;
+        stopBossMusic();
+        stopStartMusic();
+        stopRapidTick();
+        clearVictorySong();
+        bossBanner.style.display = "none";
+        dropsLabel.style.display = "none";
+
+        gameOverText.textContent = customText || "YOU DIDNT FIX ENOUGH SWARMBOTS IN TIME";
+        finalScoreLabel.textContent = "Your score: " + score;
+
+        // Default: show retry button
+        if (retryBtn) retryBtn.classList.remove('hidden');
+
+        // Show name entry only if this is a high score
+        if (isHighScore(score) && nameEntryRow && playerNameInput && saveScoreBtn) {
+            nameEntryRow.classList.remove('hidden');
+
+            // Hide Try Again when we have a high score – they go via save -> start screen
+            if (retryBtn) retryBtn.classList.add('hidden');
+
+            // Clear any previous name; rely on placeholder "ENTER NAME"
+            playerNameInput.value = '';
+            if (playerNameInput.focus) playerNameInput.focus();
+
+            saveScoreBtn.disabled = false;
+            saveScoreBtn.textContent = 'Save Score';
+        } else if (nameEntryRow) {
+            nameEntryRow.classList.add('hidden');
+        }
+
+        sfx.gameOver();
+        gameOverScreen.classList.remove("hidden");
+    }
+
+    function resetGame() {
+        score = 0; missed = 0; fixCount = 0; dropsHits = 0;
+        projectiles = []; robots = []; explosions = [];
+        fires = []; complainers = []; beers = []; droplets = []; speechBubble = null;
+        celebrationActive = false; confetti = []; dancers = []; cheerPhase = 0;
+
+        spawnTimer = 0; spawnInterval = 900; lastBeerSpawn = 0;
+        rapidUntil = 0; rapidBadge.style.display = "none";
+        stopRapidTick();
+        scoreLabel.textContent = "Score: 0";
+        missLabel.textContent = "Missed: 0 / " + maxMissed;
+        dropsLabel.textContent = "Drops: 0 / " + maxDropsHits;
+        dropsLabel.style.display = "none";
+
+        player.x = width / 2; lastFireTime = 0;
+
+        bossActive = false; boss = null;
+        timeSinceStart = 0;
+        boomIndex = 0;
+        nextBoomAtMs = BOSS_TRIGGER_GAP_MS;
+        stopBossMusic();
+        clearVictorySong();
+        bossBanner.style.display = "none";
+
+        gameOverScreen.classList.add("hidden");
+
+        // reset name entry UI
+        if (nameEntryRow) nameEntryRow.classList.add('hidden');
+        if (playerNameInput) playerNameInput.value = '';
+        if (saveScoreBtn) {
+            saveScoreBtn.disabled = false;
+            saveScoreBtn.textContent = 'Save Score';
+        }
+    }
+
+    async function startGame() {
+        await ensureAudioResumed();
+        stopStartMusic();
+        stopStartDance();
+        resetGame();
+        started = true;
+        gameRunning = true;
+        seedRobots(3);
+        startScreen.style.display = "none";
+        soundTip.style.display = "none";
+    }
+
+    // --- Save score button: now returns to start screen after saving a high score ---
+    if (saveScoreBtn) {
+        saveScoreBtn.addEventListener('click', async () => {
+            if (score <= 0) return;
+            let name = (playerNameInput.value || '').trim().toUpperCase().slice(0, 8);
+            if (!name) name = 'PLAYER';
+
+            saveScoreBtn.disabled = true;
+            saveScoreBtn.textContent = 'Saving...';
+
+            await postHighScoreToServer(name, score);
+
+            saveScoreBtn.textContent = 'Saved!';
+
+            // After saving, go back to the start screen so they can see their name
+            goToStartScreen();
+        });
+    }
+
+    // ---------- controls ----------
+    function bindButtonHold(btn, onChange) {
+        const start = e => { e.preventDefault(); onChange(true); };
+        const end   = e => { e.preventDefault(); onChange(false); };
+        btn.addEventListener("touchstart", start, { passive: false });
+        btn.addEventListener("touchend", end,   { passive: false });
+        btn.addEventListener("touchcancel", end, { passive: false });
+        btn.addEventListener("mousedown", start);
+        window.addEventListener("mouseup", end);
+    }
+
+    [leftBtn_bottom, leftBtn_side].forEach(btn => bindButtonHold(btn, v => moveLeft = v));
+    [rightBtn_bottom, rightBtn_side].forEach(btn => bindButtonHold(btn, v => moveRight = v));
+
+    function pressFire() { fireSpanner(); fireHold = isRapid(); }
+    function releaseFire() { fireHold = false; }
+
+    [fireBtn_bottom, fireBtn_side].forEach(btn => {
+        btn.addEventListener("touchstart", e => { e.preventDefault(); pressFire(); }, { passive: false });
+        btn.addEventListener("touchend",   e => { e.preventDefault(); releaseFire(); }, { passive: false });
+        btn.addEventListener("touchcancel",e => { e.preventDefault(); releaseFire(); }, { passive: false });
+        btn.addEventListener("mousedown",  e => { e.preventDefault(); pressFire(); });
+    });
+    window.addEventListener("mouseup", () => releaseFire());
+
+    retryBtn.addEventListener("click", () => { startGame(); });
+    startBtn.addEventListener("click", () => { startGame(); });
+
+    // ---------- Fullscreen handling ----------
+    function inFullscreen() {
+        return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+    }
+    function requestFS(el) {
+        if (el.requestFullscreen) return el.requestFullscreen();
+        if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+        if (el.msRequestFullscreen) return el.msRequestFullscreen();
+    }
+    function exitFS() {
+        if (document.exitFullscreen) return document.exitFullscreen();
+        if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+        if (document.msExitFullscreen) return document.msExitFullscreen();
+    }
+    function updateFsUi() {
+        fsBtn.textContent = inFullscreen() ? "Exit Fullscreen" : "Fullscreen";
+        setTimeout(() => { resizeCanvas(); positionFsBtn(); }, 50);
+    }
+    fsBtn.addEventListener('click', () => {
+        if (inFullscreen()) exitFS();
+        else requestFS(document.documentElement || gameContainer);
+    });
+    document.addEventListener('fullscreenchange', updateFsUi);
+    document.addEventListener('webkitfullscreenchange', updateFsUi);
+    document.addEventListener('msfullscreenchange', updateFsUi);
+
+    /* -------- Position Fullscreen button above right arrows in landscape -------- */
+    function positionFsBtn() {
+        if (!fsBtn) return;
+        if (isLandscape()) {
+            const cluster = rightCluster;
+            const rect = cluster.getBoundingClientRect();
+            const btnRect = fsBtn.getBoundingClientRect();
+            const btnW = btnRect.width || 110;
+
+            const centerX = rect.left + rect.width / 2;
+            const targetLeft = Math.round(centerX - btnW / 2);
+            const targetTop = Math.max(8, Math.round(rect.top - 90));
+
+            fsBtn.style.position = 'fixed';
+            fsBtn.style.left = targetLeft + 'px';
+            fsBtn.style.top = targetTop + 'px';
+            fsBtn.style.right = 'auto';
+        } else {
+            fsBtn.style.position = 'absolute';
+            fsBtn.style.left = 'auto';
+            fsBtn.style.right = '8px';
+            fsBtn.style.top = '68px';
+        }
+    }
+
+    // ---------- BOSS wave ----------
+    function startBoom() {
+        bossActive = true;
+        robots = [];
+        beers = [];
+        stopRapidTick();
+
+        bossBanner.style.display = "block";
+        bossBanner.textContent = getBoomBannerText(boomIndex);
+        bossBanner.style.color = "#ff3333";
+
+        dropsLabel.style.display = "inline";
+        dropsHits = 0;
+        dropsLabel.textContent = "Drops: " + dropsHits + " / " + maxDropsHits;
+
+        const bodyW = Math.max(120, width * 0.24);
+        const bodyH = Math.max(60, height * 0.10);
+        boss = {
+            x: width / 2 - bodyW / 2,
+            y: Math.max(80, (height - currentGutter()) * 0.22),
+            w: bodyW, h: bodyH, vx: 140, hp: BOSS_HP,
+            bodyColor: ["#c01111", "#1144c0", "#11c044"][boomIndex % 3],
+            boomInnerLen: Math.max(90, width * 0.18),
+            boomOuterLen: Math.max(70, width * 0.14),
+            foldPhase: 1.0, foldDir: -1, foldSpeed: 0.7,
+            outerPhase: 0.0, bannerPhase: 0
+        };
+        droplets = [];
+        dropletTimer = 0;
+
+        startBossMusic();
+    }
+
+    function startCelebration() {
+        celebrationActive = true;
+        celebrationUntil = performance.now() + 4000;
+        bossActive = false;
+        bossBanner.style.display = "none";
+        dropsLabel.style.display = "none";
+        droplets = [];
+        projectiles = [];
+        stopBossMusic();
+        stopRapidTick();
+        playVictorySong();
+
+        missed = 0; missLabel.textContent = "Missed: 0 / " + maxMissed;
+        dropsHits = 0;
+
+        player.x = width / 2;
+
+        confetti = [];
+        const pieces = 120;
+        for (let i = 0; i < pieces; i++) {
+            confetti.push({
+                x: Math.random() * width,
+                y: -Math.random() * 200,
+                vy: 100 + Math.random() * 120,
+                vx: -40 + Math.random() * 80,
+                size: 3 + Math.random() * 4,
+                rot: Math.random() * Math.PI * 2,
+                vr: -3 + Math.random() * 6,
+                color: `hsl(${Math.floor(Math.random()*360)},80%,60%)`
+            });
+        }
+        dancers = [];
+        const xs = [width * 0.15, width * 0.35, width * 0.65, width * 0.85];
+        for (let i = 0; i < xs.length; i++) {
+            dancers.push({
+                x: xs[i],
+                baseY: groundY - 8,
+                phase: Math.random() * Math.PI * 2,
+                speed: 6 + Math.random() * 2
+            });
+        }
+        sfx.bossExplode();
+    }
+
+    function endCelebrationAndResume() {
+        celebrationActive = false;
+        clearVictorySong();
+        confetti = []; dancers = []; cheerPhase = 0;
+        droplets = []; projectiles = [];
+        boomIndex = (boomIndex + 1) % 3;
+        nextBoomAtMs = timeSinceStart + BOSS_TRIGGER_GAP_MS;
+    }
+
+    // ---------- UPDATE ----------
+    function update(dtMs) {
+        const dt = dtMs / 1000;
+        const nowMs = performance.now();
+
+        if (gameRunning) timeSinceStart += dtMs;
+
+        if (gameRunning && !bossActive && !celebrationActive && timeSinceStart >= nextBoomAtMs) startBoom();
+
+        if (celebrationActive) {
+            confetti.forEach(p => {
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.rot += p.vr * dt;
+                if (p.y > groundY) {
+                    p.y = -20;
+                    p.x = Math.random() * width;
+                }
+            });
+            dancers.forEach(d => d.phase += d.speed * dt);
+            if (nowMs >= celebrationUntil) endCelebrationAndResume();
+        }
+
+        if (gameRunning && !celebrationActive) {
+            if (moveLeft)  player.x -= player.speed * dt;
+            if (moveRight) player.x += player.speed * dt;
+            player.x = Math.max(20, Math.min(width - 20, player.x));
+
+            if (fireHold && isRapid()) fireSpanner();
+
+            if (!bossActive) {
+                spawnTimer += dtMs;
+                if (spawnTimer >= spawnInterval) {
+                    spawnTimer = 0; spawnRobot();
+                    if (spawnInterval > 450) spawnInterval -= 5;
+                }
+            }
+
+            if (!bossActive) {
+                for (let i = robots.length - 1; i >= 0; i--) {
+                    const r = robots[i];
+                    r.y += r.speed * dt;
+                    if (r.y + r.height >= groundY) {
+                        robots.splice(i, 1);
+                        handleRobotMissed(r);
+                    }
+                }
+            }
+
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                p.y -= p.speed * dt;
+                if (p.y < -20) projectiles.splice(i, 1);
+            }
+
+            if (!bossActive) {
+                for (let i = robots.length - 1; i >= 0; i--) {
+                    const r = robots[i];
+                    const rx1 = r.x, ry1 = r.y, rx2 = r.x + r.width, ry2 = r.y + r.height;
+                    for (let j = projectiles.length - 1; j >= 0; j--) {
+                        const p = projectiles[j];
+                        if (p.x >= rx1 && p.x <= rx2 && p.y >= ry1 && p.y <= ry2) {
+                            projectiles.splice(j, 1);
+                            robots.splice(i, 1);
+                            handleRobotFixed(r);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            maybeSpawnBeer(nowMs);
+            if (!bossActive) {
+                for (let i = beers.length - 1; i >= 0; i--) {
+                    const b = beers[i];
+                    b.y += b.speed * dt;
+                    const catchRadiusX = 16;
+                    const catchYTop = player.y - 6, catchYBot = player.y + 24;
+                    if (Math.abs(b.x - player.x) < catchRadiusX && b.y > catchYTop && b.y < catchYBot) {
+                        beers.splice(i, 1);
+                        rapidUntil = performance.now() + 10000;
+                        rapidBadge.style.display = "inline-block";
+                        startRapidTick();
+                        sfx.beer();
+                        continue;
+                    }
+                    if (b.y >= groundY - 2) beers.splice(i, 1);
+                }
+            }
+
+            if (!isRapid() && rapidBadge.style.display !== "none") {
+                rapidBadge.style.display = "none";
+                stopRapidTick();
+            }
+        }
+
+        // Boss logic
+        if (bossActive && boss) {
+            boss.x += boss.vx * dt;
+            if (boss.x <= 10) { boss.x = 10; boss.vx *= -1; }
+            if (boss.x + boss.w >= width - 10) { boss.x = width - 10 - boss.w; boss.vx *= -1; }
+
+            boss.foldPhase += boss.foldDir * boss.foldSpeed * dt;
+            if (boss.foldPhase <= 0) { boss.foldPhase = 0; boss.foldDir = 1; }
+            if (boss.foldPhase >= 1) { boss.foldPhase = 1; boss.foldDir = -1; }
+
+            const innerDown = 1 - boss.foldPhase;
+            const startOuterAt = 0.3;
+            boss.outerPhase = innerDown <= startOuterAt ? 0 : Math.min(1, (innerDown - startOuterAt) / (1 - startOuterAt));
+
+            boss.bannerPhase += dt;
+            const flashOn = Math.floor(boss.bannerPhase * 4) % 2 === 0;
+            bossBanner.style.color = flashOn ? "#ff3b3b" : "#35ff35";
+
+            dropletTimer += dtMs;
+            const dropletInterval = 450;
+            if (dropletTimer >= dropletInterval) {
+                dropletTimer = 0;
+                const count = 1 + (Math.random() < 0.5 ? 0 : 1);
+                for (let i = 0; i < count; i++) {
+                    const t = Math.random();
+                    const x = boss.x + boss.w * t;
+                    droplets.push({ x, y: boss.y + boss.h + 6, vy: 180 + Math.random() * 80, r: 4 });
+                }
+            }
+
+            for (let i = droplets.length - 1; i >= 0; i--) {
+                const d = droplets[i];
+                d.y += d.vy * dt;
+                const px1 = player.x - 8, px2 = player.x + 8;
+                const py1 = player.y, py2 = player.y + 30;
+                if (d.x >= px1 && d.x <= px2 && d.y + d.r >= py1 && d.y - d.r <= py2) {
+                    droplets.splice(i, 1);
+                    dropsHits++;
+                    dropsLabel.textContent = "Drops: " + dropsHits + " / " + maxDropsHits;
+                    if (dropsHits >= maxDropsHits) {
+                        endGame("You got too much chemical on your Uniform... Your Fired!");
+                        return;
+                    }
+                    continue;
+                }
+                if (d.y > groundY + groundMargin) droplets.splice(i, 1);
+            }
+
+            const bx1 = boss.x, by1 = boss.y, bx2 = boss.x + boss.w, by2 = boss.y + boss.h + 10;
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                if (p.x >= bx1 && p.x <= bx2 && p.y >= by1 && p.y <= by2) {
+                    projectiles.splice(i, 1);
+                    boss.hp--;
+                    sfx.bossHit();
+                    explosions.push({ x: p.x, y: p.y, radius: 16, total: 220, remaining: 220 });
+                    if (boss.hp <= 0) {
+                        explosions.push({ x: boss.x + boss.w/2, y: boss.y + boss.h/2, radius: 45, total: 700, remaining: 700 });
+                        startCelebration();
+                        boss = null;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // explosions
+        for (let i = explosions.length - 1; i >= 0; i--) {
+            const e = explosions[i];
+            e.remaining -= dtMs;
+            if (e.remaining <= 0) explosions.splice(i, 1);
+        }
+
+        // fires
+        for (let i = fires.length - 1; i >= 0; i--) {
+            const f = fires[i];
+            f.remaining -= dtMs;
+            if (f.remaining <= 0) fires.splice(i, 1);
+        }
+
+        // complainers
+        for (let i = complainers.length - 1; i >= 0; i--) {
+            const c = complainers[i];
+            if (!c) continue;
+            c.t += dt;
+            if (c.phase === "enter") {
+                c.x += c.speed * c.dir * dt;
+                if ((c.dir === 1 && c.x >= c.targetX) || (c.dir === -1 && c.x <= c.targetX)) {
+                    c.phase = "shake"; c.t = 0;
+                }
+            } else if (c.phase === "shake") {
+                if (c.t * 1000 > c.durationShake) { c.phase = "exit"; c.t = 0; }
+            } else if (c.phase === "exit") {
+                c.x += c.speed * c.dir * dt * 1.2;
+            }
+            if ((c.dir === 1 && c.x > width + 50) || (c.dir === -1 && c.x < -50)) {
+                complainers.splice(i, 1);
+            }
+        }
+
+        if (speechBubble) {
+            speechBubble.remaining -= dtMs;
+            if (speechBubble.remaining <= 0) speechBubble = null;
+        }
+    }
+
+    const dressPalette = ["#ff6ec7", "#7ad1ff", "#ffd166", "#a0ff6b", "#c79cff", "#ff9f43"];
+    function drawCelebrationOverlay() {
+        const gutter = currentGutter();
+        confetti.forEach(p => {
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rot);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+            ctx.restore();
+        });
+
+        drawPlayerCheering();
+
+        dancers.forEach((d, idx) => {
+            drawStickGirl(d.x, d.baseY, d.phase, idx);
+        });
+
+        ctx.save();
+        ctx.font = "bold 24px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.lineWidth = 3;
+        const msg = "YES! Boom Configured";
+        ctx.strokeText(msg, width/2, Math.max(40, (height - gutter) * 0.12));
+        ctx.fillText(msg, width/2, Math.max(40, (height - gutter) * 0.12));
+        ctx.restore();
+    }
+
+    function drawStickGirl(x, baseY, phase, variant) {
+        const bounce = Math.sin(phase * 2) * 6;
+        const y = baseY - 28 - bounce;
+
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2.5;
+
+        ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x-6, y-6); ctx.lineTo(x-10, y-10);
+        ctx.moveTo(x+6, y-6); ctx.lineTo(x+10, y-10);
+        ctx.stroke();
+
+        ctx.beginPath(); ctx.moveTo(x, y+6); ctx.lineTo(x, y+22); ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x, y+22);
+        ctx.lineTo(x-8, y+40);
+        ctx.moveTo(x, y+22);
+        ctx.lineTo(x+8, y+40);
+        ctx.stroke();
+
+        const dressColor = dressPalette[variant % dressPalette.length];
+        ctx.fillStyle = dressColor;
+        ctx.beginPath();
+        ctx.moveTo(x, y+22);
+        ctx.lineTo(x-11, y+36);
+        ctx.lineTo(x+11, y+36);
+        ctx.closePath();
+        ctx.fill();
+
+        const armAmp = 8;
+        ctx.beginPath();
+        ctx.moveTo(x, y+10);
+        ctx.lineTo(x-12, y + 10 - Math.sin(phase*4 + variant)*armAmp);
+        ctx.moveTo(x, y+10);
+        ctx.lineTo(x+12, y + 10 + Math.sin(phase*4 + variant)*armAmp);
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function draw() {
+        ctx.globalAlpha = 1;
+        ctx.clearRect(0, 0, width, height);
+
+        const baseColor = "#2b2b2b";
+        let bg = baseColor;
+        if (isRapid()) {
+            const flashOn = (Math.floor(performance.now() / 120) % 2) === 0;
+            bg = flashOn ? "#b00000" : baseColor;
+        }
+        const gutter = currentGutter();
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, width, height - gutter);
+
+        drawGround();
+        fires.forEach(drawFire);
+
+        if (!bossActive) robots.forEach(drawRobot);
+        beers.forEach(drawBeerFalling);
+
+        if (bossActive) {
+            droplets.forEach(d => {
+                ctx.fillStyle = "#4ea3ff";
+                ctx.beginPath();
+                ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+                ctx.fill();
+            });
+        }
+
+        if (!celebrationActive) {
+            projectiles.forEach(drawProjectile);
+        }
+
+        if (!celebrationActive) {
+            drawPlayerNormal();
+            drawSpeechBubbleForPlayer();
+        }
+
+        drawFooterPanel();
+        complainers.forEach(drawComplainer);
+
+        if (bossActive && boss) drawBoss(boss);
+
+        explosions.forEach(drawExplosion);
+
+        if (celebrationActive) drawCelebrationOverlay();
+    }
+
+    // ---------- main loop ----------
+    let lastUpdate = performance.now();
+    function gameLoop(ts) {
+        const dt = ts - lastUpdate;
+        lastUpdate = ts;
+        try {
+            if (started) update(dt);
+            draw();
+        } catch (e) { console.error(e); }
+        requestAnimationFrame(gameLoop);
+    }
+
+    /* ---------- START SCREEN DANCERS (cowboy hats) + responsive sizing ---------- */
+    let sdCtx, sdW=0, sdH=0, startDanceRAF=null;
+
+    function layoutStartScreen(andResizeCanvas=false) {
+        const targetH = Math.max(120, Math.floor(window.innerHeight * 0.28));
+        startDance.style.height = targetH + "px";
+        if (andResizeCanvas) resizeStartDance();
+    }
+
+    function resizeStartDance() {
+        if (!startDance) return;
+        const rect = startDance.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        sdW = Math.max(280, Math.floor(rect.width));
+        sdH = Math.max(100, Math.floor(rect.height));
+        startDance.width = sdW * dpr;
+        startDance.height = sdH * dpr;
+        sdCtx = startDance.getContext('2d');
+        sdCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function drawBeerMugStart(ctx, x, y, s=1) {
+        const w = 12*s, h = 18*s;
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 215, 70, 0.95)";
+        ctx.fillRect(x - w/2, y - h, w, h);
+        ctx.fillStyle = "#eee";
+        ctx.fillRect(x - w/2, y - h, w, 5*s);
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.ellipse(x - w*0.2, y - h - 2*s, w*0.34, 3*s, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.lineWidth = 2*s; ctx.strokeStyle = "#ddd";
+        ctx.arc(x + w/2 + 3*s, y - h/2, 4*s, -Math.PI/2, Math.PI/2); ctx.stroke();
+        ctx.restore();
+    }
+    function drawCigarette(ctx, x, y, angle=0) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.fillStyle = "#efefef";
+        ctx.fillRect(0, -1, 12, 2);
+        ctx.fillStyle = "#ff4a2a";
+        ctx.fillRect(12, -1, 2, 2);
+        ctx.strokeStyle = "rgba(200,200,200,0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(14, 0);
+        ctx.quadraticCurveTo(18, -4, 22, -2);
+        ctx.stroke();
+        ctx.restore();
+    }
+    function drawCowboy(ctx, x, y, s, t, variant=0) {
+        const sway = Math.sin(t*2 + variant)*8;
+        const thrust = Math.sin(t*3 + variant)*6;
+        const raise = (Math.sin(t*2.5 + variant*1.5) > 0.3) ? 10 : 0;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(s, s);
+        ctx.lineCap = "round";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#fff";
+
+        const headY = -40 + Math.sin(t*2 + variant)*2;
+        ctx.beginPath(); ctx.arc(0, headY, 8, 0, Math.PI*2); ctx.stroke();
+
+        ctx.fillStyle = "#c48a3a";
+        ctx.strokeStyle = "#c48a3a";
+        ctx.beginPath(); ctx.ellipse(0, headY-12, 22, 5, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(-10, headY-12);
+        ctx.lineTo(-8, headY-22);
+        ctx.lineTo(8, headY-22);
+        ctx.lineTo(10, headY-12);
+        ctx.closePath(); ctx.fill();
+
+        ctx.strokeStyle = "#fff";
+
+        ctx.beginPath(); ctx.moveTo(0, -28); ctx.lineTo(0, -8 + thrust*0.2); ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(0, -8 + thrust*0.2);
+        ctx.lineTo(-10 - sway*0.2, 10 + thrust);
+        ctx.moveTo(0, -8 + thrust*0.2);
+        ctx.lineTo(10 + sway*0.2, 10 - thrust);
+        ctx.stroke();
+
+        ctx.beginPath();
+        const leftHandX = -16, leftHandY = -24 - raise - Math.sin(t*6 + variant)*6;
+        ctx.moveTo(0, -24);
+        ctx.lineTo(leftHandX, leftHandY);
+        const rightHandX = 16, rightHandY = -24 + raise + Math.cos(t*5 + variant)*6;
+        ctx.moveTo(0, -24);
+        ctx.lineTo(rightHandX, rightHandY);
+        ctx.stroke();
+
+        if (variant === 0) {
+            drawBeerMugStart(ctx, leftHandX, leftHandY, 0.9);
+        } else {
+            drawCigarette(ctx, 6, headY + 1, 0.05);
+        }
+
+        ctx.restore();
+    }
+
+    function startStartDance() {
+        layoutStartScreen();
+        resizeStartDance();
+        function frame(ts) {
+            const t = ts/1000;
+            sdCtx.clearRect(0,0,sdW,sdH);
+
+            sdCtx.strokeStyle = "rgba(255,255,255,0.25)";
+            sdCtx.lineWidth = 2;
+            sdCtx.beginPath();
+            sdCtx.moveTo(20, sdH-20);
+            sdCtx.lineTo(sdW-20, sdH-20);
+            sdCtx.stroke();
+
+            for (let i=0;i<14;i++){
+                const px = 30 + (i* (sdW-60)/13);
+                const py = sdH-20 - Math.abs(Math.sin(t*2 + i))*8 - 4;
+                sdCtx.fillStyle = `hsl(${(i*35 + t*120)%360},80%,55%)`;
+                sdCtx.beginPath(); sdCtx.arc(px, py, 3, 0, Math.PI*2); sdCtx.fill();
+            }
+
+            drawCowboy(sdCtx, sdW*0.35, sdH-24, 1.2, t, 0);
+            drawCowboy(sdCtx, sdW*0.65, sdH-24, 1.2, t, 1);
+
+            startDanceRAF = requestAnimationFrame(frame);
+        }
+        startDanceRAF = requestAnimationFrame(frame);
+    }
+    function stopStartDance() {
+        if (startDanceRAF) cancelAnimationFrame(startDanceRAF);
+        startDanceRAF = null;
+    }
+    window.addEventListener('resize', () => { if (!started) { layoutStartScreen(true); } });
+
+    // Kick off start-screen dancers and try to start drum music immediately on load
+    initAudio();
+    startStartDance();
+    attemptAutoplayStartMusic();
+
+    // Initial placement for FS button
+    positionFsBtn();
+
+    // Game render/update loop
+    requestAnimationFrame(gameLoop);
+
+})();
+</script>
+</body>
+</html>
+

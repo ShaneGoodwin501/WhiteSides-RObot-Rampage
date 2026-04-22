@@ -80,7 +80,14 @@ if ($method === 'POST') {
         exit;
     }
 
-    $name  = isset($input['name'])  ? strtoupper(trim($input['name'])) : '';
+    $rawName = $input['name'] ?? null;
+    if (!is_string($rawName)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid name or score']);
+        exit;
+    }
+
+    $name  = strtoupper(trim($rawName));
     $score = isset($input['score']) ? intval($input['score']) : 0;
     $name = preg_replace("/[^A-Z0-9\\s'\\-]/", '', $name);
 

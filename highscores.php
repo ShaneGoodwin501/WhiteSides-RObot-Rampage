@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 // highscores.php
 // Simple global high score API: GET returns list, POST adds a score
 
@@ -7,6 +8,7 @@ header('Content-Type: application/json');
 // === CONFIG ===
 $file = __DIR__ . '/highscores.json'; // where scores are stored
 $maxEntries = 10;
+const MAX_SCORE_VALUE = 2147483647;
 
 // Load existing scores from file
 function load_scores($file) {
@@ -15,6 +17,31 @@ function load_scores($file) {
     $data = json_decode($json, true);
     if (!is_array($data)) return [];
     return $data;
+}
+
+function normalize_scores($scores, $maxEntries) {
+    if (!is_array($scores)) return [];
+
+    $clean = [];
+    foreach ($scores as $entry) {
+        if (!is_array($entry)) continue;
+        $name = isset($entry['name']) ? strtoupper(trim((string)$entry['name'])) : '';
+        $score = isset($entry['score']) ? intval($entry['score']) : 0;
+        if ($name === '' || $score <= 0) continue;
+
+        // keep letters, numbers, spaces, apostrophes and dashes only
+        $name = preg_replace("/[^A-Z0-9\\s'\\-]/", '', $name);
+        $name = trim(substr($name, 0, 8));
+        if ($name === '') continue;
+
+        $clean[] = ['name' => $name, 'score' => min($score, MAX_SCORE_VALUE)];
+    }
+
+    usort($clean, function($a, $b) {
+        return ($b['score'] ?? 0) <=> ($a['score'] ?? 0);
+    });
+
+    return array_slice($clean, 0, $maxEntries);
 }
 
 // Save scores to file with basic locking
@@ -39,12 +66,7 @@ function save_scores($file, $scores) {
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
-    $scores = load_scores($file);
-
-    // Sort descending by score
-    usort($scores, function($a, $b) {
-        return ($b['score'] ?? 0) <=> ($a['score'] ?? 0);
-    });
+    $scores = normalize_scores(load_scores($file), $maxEntries);
 
     echo json_encode($scores);
     exit;
@@ -52,11 +74,17 @@ if ($method === 'GET') {
 
 if ($method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid JSON payload']);
+        exit;
+    }
 
     $name  = isset($input['name'])  ? strtoupper(trim($input['name'])) : '';
     $score = isset($input['score']) ? intval($input['score']) : 0;
+    $name = preg_replace("/[^A-Z0-9\\s'\\-]/", '', $name);
 
-    if ($score <= 0 || $name === '') {
+    if ($score <= 0 || $name === '' || $score > MAX_SCORE_VALUE) {
         http_response_code(400);
         echo json_encode(['error' => 'Invalid name or score']);
         exit;
@@ -65,14 +93,9 @@ if ($method === 'POST') {
     // Hard cap name length to 8 chars
     $name = substr($name, 0, 8);
 
-    $scores = load_scores($file);
+    $scores = normalize_scores(load_scores($file), $maxEntries);
     $scores[] = ['name' => $name, 'score' => $score];
-
-    // Sort and trim to maxEntries
-    usort($scores, function($a, $b) {
-        return ($b['score'] ?? 0) <=> ($a['score'] ?? 0);
-    });
-    $scores = array_slice($scores, 0, $maxEntries);
+    $scores = normalize_scores($scores, $maxEntries);
 
     if (!save_scores($file, $scores)) {
         http_response_code(500);
@@ -87,4 +110,3 @@ if ($method === 'POST') {
 // Fallback for other methods
 http_response_code(405);
 echo json_encode(['error' => 'Method not allowed']);
-
